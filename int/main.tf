@@ -6,7 +6,7 @@ provider "azurerm" {
 variable "prefix" {
   type        = string
   description = "(Optional) The prefix which should be used for all resources in this example. Defaults to burrito."
-  default     = "burrito"
+  default     = "taco"
 }
 
 variable "location" {
