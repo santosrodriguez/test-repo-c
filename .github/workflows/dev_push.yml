@@ -1,4 +1,4 @@
-name: 'Push on Dev environment'
+name: 'Push on DEV environment'
 
 on:
   push:

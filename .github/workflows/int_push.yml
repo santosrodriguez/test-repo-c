@@ -1,4 +1,4 @@
-name: 'Push on int environment'
+name: 'Push on INT environment'
 
 on:
   push:
