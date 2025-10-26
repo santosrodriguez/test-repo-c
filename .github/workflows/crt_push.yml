@@ -1,4 +1,4 @@
-name: 'Push on crt environment'
+name: 'Push on CRT environment'
 
 on:
   push:
