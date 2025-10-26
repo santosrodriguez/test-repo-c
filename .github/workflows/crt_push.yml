@@ -12,6 +12,8 @@ env:
 permissions:
     id-token: write
     contents: read
+    pull-requests: read
+    checks: read
 
 jobs:
   terraform:
@@ -27,17 +29,82 @@ jobs:
         working-directory: ./crt
 
     steps:
+          # Determine whether this push came from an approved PR
+    - name: Determine deployment eligibility
+      id: pr-gate
+      uses: actions/github-script@v6
+      with:
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        result-encoding: string
+        script: |
+          const commitSha = context.payload.after;
+          const owner = context.repo.owner;
+          const repo = context.repo.repo;
+
+          async function result(payload) {
+            return JSON.stringify(payload);
+          }
+
+          const { data: prs } = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+            owner,
+            repo,
+            commit_sha: commitSha,
+          });
+
+          if (!prs.length) {
+            core.notice(`No pull request found for commit ${commitSha}. Skipping deployment.`);
+            return result({ proceed: false, reason: 'no_pr' });
+          }
+
+          const pr = prs.find(p => p.base?.ref === 'main') ?? prs[0];
+
+          if (!pr.merged_at) {
+            core.notice(`Pull request #${pr.number} is not merged. Skipping deployment.`);
+            return result({ proceed: false, reason: 'not_merged', pr: pr.number });
+          }
+
+          const { data: reviews } = await github.rest.pulls.listReviews({
+            owner,
+            repo,
+            pull_number: pr.number,
+          });
+
+          const approved = reviews.some(review => review.state === 'APPROVED');
+
+          if (!approved) {
+            core.notice(`Pull request #${pr.number} has no approving reviews. Skipping deployment.`);
+            return result({ proceed: false, reason: 'not_approved', pr: pr.number });
+          }
+
+          const { data: checkRuns } = await github.rest.checks.listForRef({
+            owner,
+            repo,
+            ref: commitSha,
+          });
+
+          const devCheck = checkRuns.check_runs?.find(run => run.name === 'pr-infra-check' && run.conclusion === 'success');
+
+          if (!devCheck) {
+            core.notice(`Required workflow 'pr-infra-check' did not complete successfully for commit ${commitSha}. Skipping deployment.`);
+            return result({ proceed: false, reason: 'check_failed', pr: pr.number });
+          }
+
+          core.notice(`Deploying commit ${commitSha} from approved PR #${pr.number}.`);
+          return result({ proceed: true, pr: pr.number });
+
     # Checkout the repository to the GitHub Actions runner
     - name: Checkout
+      if: ${{ fromJson(steps.pr-gate.outputs.result).proceed }}
       uses: actions/checkout@v3
 
     # Install the preferred version of Terraform CLI 
     - name: Setup Terraform
+      if: ${{ fromJson(steps.pr-gate.outputs.result).proceed }}
       uses: hashicorp/setup-terraform@v2
 
     # Log into Azure with OIDC integration if branch is main
     - name: 'Az CLI login for Main branch' 
-      if: github.ref == 'refs/heads/main'
+      if: ${{ fromJson(steps.pr-gate.outputs.result).proceed && github.ref == 'refs/heads/main' }}
       uses: azure/login@v1
       with:
         client-id: ${{ secrets.AZURE_CLIENT_ID }}
@@ -47,7 +114,7 @@ jobs:
     # Run Terraform init for Main branch
     - name: Terraform Init for Main branch
       id: init-main
-      if: github.ref == 'refs/heads/main'
+      if: ${{ fromJson(steps.pr-gate.outputs.result).proceed && github.ref == 'refs/heads/main' }}
       env:
         TF_STORAGE_ACCOUNT: ${{ secrets.TF_STORAGE_ACCOUNT }}
         TF_CONTAINER_NAME: ${{ secrets.TF_CONTAINER_NAME }}
@@ -60,7 +127,7 @@ jobs:
 
     # Run Terraform apply if branch is main
     - name: Terraform Apply for Main branch
-      if: github.ref == 'refs/heads/main'
+      if: ${{ fromJson(steps.pr-gate.outputs.result).proceed && github.ref == 'refs/heads/main' }}
       id: apply
       env:
         ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
@@ -71,19 +138,19 @@ jobs:
     # Run formatting and validate if the branch is not main
     - name: Terraform Init for other branches
       id: init
-      if: github.ref != 'refs/heads/main'
+      if: ${{ fromJson(steps.pr-gate.outputs.result).proceed && github.ref != 'refs/heads/main' }}
       run: terraform init -backend=false
 
     # Run a Terraform format
     - name: Terraform format for other branches
-      if: github.ref != 'refs/heads/main'
+      if: ${{ fromJson(steps.pr-gate.outputs.result).proceed && github.ref != 'refs/heads/main' }}
       id: fmt
       run: terraform fmt -check
 
     # Run a Terraform validate
     - name: Terraform validate for other branches
       id: validate
-      if: (success() || failure()) && github.ref != 'refs/heads/main'
+      if: ${{ (success() || failure()) && fromJson(steps.pr-gate.outputs.result).proceed && github.ref != 'refs/heads/main' }}
       env:
         ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
         ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
