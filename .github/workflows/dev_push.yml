@@ -76,13 +76,30 @@ jobs:
             return result({ proceed: false, reason: 'not_approved', pr: pr.number });
           }
 
-          const { data: checkRuns } = await github.rest.checks.listForRef({
-            owner,
-            repo,
-            ref: commitSha,
-          });
+          const candidateRefs = Array.from(
+            new Set(
+              [pr.head?.sha, pr.merge_commit_sha, commitSha].filter(Boolean)
+            )
+          );
 
-          const devCheck = checkRuns.check_runs?.find(run => run.name === 'pr-infra-check' && run.conclusion === 'success');
+          let devCheck = null;
+
+          for (const ref of candidateRefs) {
+            const { data: checkRuns } = await github.rest.checks.listForRef({
+              owner,
+              repo,
+              ref,
+            });
+
+            devCheck = checkRuns.check_runs?.find(
+              run => run.name === 'pr-infra-check' && run.conclusion === 'success'
+            );
+
+            if (devCheck) {
+              core.info(`Found successful 'pr-infra-check' on ${ref}.`);
+              break;
+            }
+          }
 
           if (!devCheck) {
             core.notice(`Required workflow 'pr-infra-check' did not complete successfully for commit ${commitSha}. Skipping deployment.`);
