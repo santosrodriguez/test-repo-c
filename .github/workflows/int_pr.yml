@@ -1,4 +1,4 @@
-name: 'Pull Request on int environment'
+name: 'Pull Request on INT environment'
 
 on:
   pull_request:
@@ -24,7 +24,8 @@ jobs:
     runs-on: ubuntu-latest
     environment: 
       name: int
-
+    env:
+      tf_actions_working_dir: ./int
     defaults:
       run:
         shell: bash
@@ -52,10 +53,9 @@ jobs:
       run: |
         az account show
 
-    # Run Terraform init for Main branch
-    - name: Terraform Init for Main branch
-      id: init-main
-      if: github.ref == 'refs/heads/main'
+    # Run Terraform init
+    - name: Terraform Init
+      id: init
       env:
         TF_STORAGE_ACCOUNT: ${{ secrets.TF_STORAGE_ACCOUNT }}
         TF_CONTAINER_NAME: ${{ secrets.TF_CONTAINER_NAME }}
@@ -79,7 +79,14 @@ jobs:
         ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
         ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
         ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-      run: terraform validate -no-color
+      run: |
+        set -o pipefail
+        terraform validate -no-color | tee validate.log
+        {
+          echo "stdout<<EOF"
+          cat validate.log
+          echo "EOF"
+        } >> "$GITHUB_OUTPUT"
 
     # Run a Terraform plan
     - name: Terraform plan
@@ -88,7 +95,14 @@ jobs:
         ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
         ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
         ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-      run: terraform plan -no-color
+      run: |
+        set -o pipefail
+        terraform plan -no-color | tee plan.log
+        {
+          echo "stdout<<EOF"
+          cat plan.log
+          echo "EOF"
+        } >> "$GITHUB_OUTPUT"
 
     # Add a comment to pull requests with plan results weeeeeee
     - name: Add Plan Comment
