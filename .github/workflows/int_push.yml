@@ -1,9 +1,9 @@
-name: 'Push on Prod environment'
+name: 'Push on int environment'
 
 on:
   push:
     paths:
-      - 'prod/**'
+      - 'int/**'
 
 env:
   TF_LOG: INFO
@@ -22,7 +22,7 @@ jobs:
     defaults:
       run:
         shell: bash
-        working-directory: ./prod
+        working-directory: ./int
 
     steps:
     # Checkout the repository to the GitHub Actions runner

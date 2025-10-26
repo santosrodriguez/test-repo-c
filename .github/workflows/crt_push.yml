@@ -1,9 +1,9 @@
-name: 'Push on Staging environment'
+name: 'Push on crt environment'
 
 on:
   push:
     paths:
-      - 'staging/**'
+      - 'crt/**'
 
 env:
   TF_LOG: INFO
@@ -22,7 +22,7 @@ jobs:
     defaults:
       run:
         shell: bash
-        working-directory: ./staging
+        working-directory: ./crt
 
     steps:
     # Checkout the repository to the GitHub Actions runner
