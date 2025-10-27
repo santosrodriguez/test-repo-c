@@ -6,6 +6,12 @@ on:
       - main
     paths:
       - 'dev/**'
+  workflow_dispatch:
+    inputs:
+      target_ref:
+        description: 'Branch or tag to check'
+        required: true
+        default: 'main'
 
 
 env:
@@ -36,6 +42,8 @@ jobs:
     # Checkout the repository to the GitHub Actions runner
     - name: Checkout
       uses: actions/checkout@v3
+      with:
+        ref: ${{ github.event_name == 'workflow_dispatch' && inputs.target_ref || github.ref }}
 
     # Install the latest version of Terraform CLI 
     - name: Setup Terraform
@@ -108,6 +116,7 @@ jobs:
     # Add a comment to pull requests with plan results weeeeeee
     - name: Add Plan Comment
       id: comment
+      if: github.event_name == 'pull_request'
       uses: actions/github-script@v6
       env:
         PLAN: "terraform\n${{ steps.plan.outputs.stdout }}"
@@ -133,3 +142,11 @@ jobs:
             repo: context.repo.repo,
             body: output
           })
+
+    - name: Show Plan Summary
+      if: github.event_name == 'workflow_dispatch'
+      run: |
+        printf 'Terraform Format: %s\n' '${{ steps.fmt.outcome }}'
+        printf 'Terraform Init: %s\n' '${{ steps.init.outcome }}'
+        printf 'Terraform Validate:\n%s\n' '${{ steps.validate.outputs.stdout }}'
+        printf 'Terraform Plan: %s\n\nPlan Output:\n%s\n' '${{ steps.plan.outcome }}' '${{ steps.plan.outputs.stdout }}'
