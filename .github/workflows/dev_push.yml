@@ -100,7 +100,6 @@ jobs:
               break;
             }
           }
-
           if (!devCheck) {
             core.notice(`Required workflow 'pr-infra-check' did not complete successfully for commit ${commitSha}. Skipping deployment.`);
             return result({ proceed: false, reason: 'check_failed', pr: pr.number });

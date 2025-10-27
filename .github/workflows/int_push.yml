@@ -76,14 +76,30 @@ jobs:
             return result({ proceed: false, reason: 'not_approved', pr: pr.number });
           }
 
+          const candidateRefs = Array.from(
+            new Set(
+              [pr.head?.sha, pr.merge_commit_sha, commitSha].filter(Boolean)
+            )
+          );
+
+          let devCheck = null;
+
+          for (const ref of candidateRefs) {
           const { data: checkRuns } = await github.rest.checks.listForRef({
             owner,
             repo,
-            ref: commitSha,
+            ref,
           });
 
-          const devCheck = checkRuns.check_runs?.find(run => run.name === 'pr-infra-check' && run.conclusion === 'success');
+            devCheck = checkRuns.check_runs?.find(
+              run => run.name === 'pr-infra-check' && run.conclusion === 'success'
+            );
 
+            if (devCheck) {
+              core.info(`Found successful 'pr-infra-check' on ${ref}.`);
+              break;
+            }
+          }
           if (!devCheck) {
             core.notice(`Required workflow 'pr-infra-check' did not complete successfully for commit ${commitSha}. Skipping deployment.`);
             return result({ proceed: false, reason: 'check_failed', pr: pr.number });
