@@ -111,7 +111,7 @@ jobs:
     # Checkout the repository to the GitHub Actions runner
     - name: Checkout
       if: ${{ fromJson(steps.pr-gate.outputs.result).proceed }}
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     # Install the preferred version of Terraform CLI 
     - name: Setup Terraform
@@ -121,7 +121,7 @@ jobs:
     # Log into Azure with OIDC integration if branch is main
     - name: 'Az CLI login for Main branch' 
       if: ${{ fromJson(steps.pr-gate.outputs.result).proceed && github.ref == 'refs/heads/main' }}
-      uses: azure/login@v1
+      uses: azure/login@v2
       with:
         client-id: ${{ secrets.AZURE_CLIENT_ID }}
         tenant-id: ${{ secrets.AZURE_TENANT_ID }}
