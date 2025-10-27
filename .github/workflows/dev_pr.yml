@@ -146,7 +146,12 @@ jobs:
     - name: Show Plan Summary
       if: github.event_name == 'workflow_dispatch'
       run: |
-        printf 'Terraform Format: %s\n' '${{ steps.fmt.outcome }}'
-        printf 'Terraform Init: %s\n' '${{ steps.init.outcome }}'
-        printf 'Terraform Validate:\n%s\n' '${{ steps.validate.outputs.stdout }}'
-        printf 'Terraform Plan: %s\n\nPlan Output:\n%s\n' '${{ steps.plan.outcome }}' '${{ steps.plan.outputs.stdout }}'
+        cat <<'EOF'
+        Terraform Format: ${{ steps.fmt.outcome }}
+        Terraform Init: ${{ steps.init.outcome }}
+        Terraform Validate:
+        ${{ steps.validate.outputs.stdout }}
+        Terraform Plan: ${{ steps.plan.outcome }}
+        Plan Output:
+        ${{ steps.plan.outputs.stdout }}
+        EOF
