@@ -47,34 +47,3 @@ This ensures that all infrastructure changes are validated, peer-reviewed, and c
 Repository Structure
 
 Each environment resides in its own directory, containing Terraform configuration files and a dedicated backend configuration for the Azure Storage Account state file.
-
-***bash
-terraform-repo/
-├── dev/
-│   ├── main.tf
-│   ├── variables.tf
-│   ├── outputs.tf
-│   ├── backend.hcl
-│   └── dev.tfvars
-├── int/
-│   ├── main.tf
-│   ├── variables.tf
-│   ├── outputs.tf
-│   ├── backend.hcl
-│   └── int.tfvars
-├── crt/
-│   ├── main.tf
-│   ├── variables.tf
-│   ├── outputs.tf
-│   ├── backend.hcl
-│   └── art.tfvars
-├── prd/
-│   ├── main.tf
-│   ├── variables.tf
-│   ├── outputs.tf
-│   ├── backend.hcl
-│   └── pre.tfvars
-└── common.auto.tfvars
-
-
-Each environment’s backend.hcl defines its own Azure Storage Account, container, and state file name, ensuring isolated state management and clear backend separation.
