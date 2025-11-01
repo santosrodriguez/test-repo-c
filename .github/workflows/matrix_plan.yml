@@ -28,6 +28,7 @@ jobs:
       matrix: ${{ steps.set.outputs.matrix }}
     steps:
       - uses: actions/checkout@v4
+
       - uses: dorny/paths-filter@v3
         id: pf
         with:
@@ -36,15 +37,27 @@ jobs:
             int: 'int/**'
             crt: 'crt/**'
             prd: 'prd/**'
+
+      # Build a JSON matrix safely (no dynamic indexing in expressions)
       - id: set
+        env:
+          DEV_CHANGED: ${{ steps.pf.outputs.dev }}
+          INT_CHANGED: ${{ steps.pf.outputs.int }}
+          CRT_CHANGED: ${{ steps.pf.outputs.crt }}
+          PRD_CHANGED: ${{ steps.pf.outputs.prd }}
         run: |
           changed=()
-          for e in dev int crt prd; do
-            if [ "${{ steps.pf.outputs[$e] }}" == "true" ]; then
-              changed+=("{\"env\":\"$e\",\"dir\":\"./$e\"}")
-            fi
-          done
-          echo "matrix={\"include\":[${changed[*]}]}" >> "$GITHUB_OUTPUT"
+          [ "$DEV_CHANGED" = "true" ] && changed+=('{"env":"dev","dir":"./dev"}')
+          [ "$INT_CHANGED" = "true" ] && changed+=('{"env":"int","dir":"./int"}')
+          [ "$CRT_CHANGED" = "true" ] && changed+=('{"env":"crt","dir":"./crt"}')
+          [ "$PRD_CHANGED" = "true" ] && changed+=('{"env":"prd","dir":"./prd"}')
+
+          if [ ${#changed[@]} -eq 0 ]; then
+            echo 'matrix={"include":[]}' >> "$GITHUB_OUTPUT"
+          else
+            printf -v joined '%s,' "${changed[@]}"
+            echo "matrix={\"include\":[${joined%,}]}" >> "$GITHUB_OUTPUT"
+          fi
 
   plan:
     name: Terraform Plan
@@ -59,6 +72,7 @@ jobs:
       run:
         shell: bash
         working-directory: ${{ matrix.dir }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -99,14 +113,12 @@ jobs:
       - name: Comment plan on PR
         if: github.event_name == 'pull_request'
         uses: actions/github-script@v6
-        env:
-          PLAN: "terraform\n${{ steps.plan.outputs.stdout }}"
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const fs = require('fs');
             const plan = fs.readFileSync('plan.log','utf8');
-            const output = `#### Terraform Plan for ${process.env.GITHUB_ENVIRONMENT}
+            const output = `#### Terraform Plan
 
 <details><summary>Show Plan</summary>
 
@@ -116,10 +128,13 @@ ${plan}
 
 </details>
 
-*Env = ${{ matrix.env }}, Dir = ${{ matrix.dir }}*`;
+*Env = ${process.env.MATRIX_ENV || '${{ matrix.env }}'}, Dir = ${process.env.MATRIX_DIR || '${{ matrix.dir }}'}*`;
             github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
               body: output
             })
+        env:
+          MATRIX_ENV: ${{ matrix.env }}
+          MATRIX_DIR: ${{ matrix.dir }}
