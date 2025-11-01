@@ -48,6 +48,7 @@ Repository Structure
 
 Each environment resides in its own directory, containing Terraform configuration files and a dedicated backend configuration for the Azure Storage Account state file.
 
+***
 terraform-repo/
 ├── dev/
 │   ├── main.tf
@@ -74,5 +75,6 @@ terraform-repo/
 │   ├── backend.hcl
 │   └── pre.tfvars
 └── common.auto.tfvars
+***
 
 Each environment’s backend.hcl defines its own Azure Storage Account, container, and state file name, ensuring isolated state management and clear backend separation.
