@@ -2,7 +2,7 @@ name: 'Push on DEV environment'
 
 on:
   push:
-    branch:
+    branches:
      - main
     paths:
       - 'dev/**'
