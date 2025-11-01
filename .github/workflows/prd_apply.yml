@@ -1,7 +1,9 @@
-name: 'Push on PRD environment'
+name: 'Push on DEV environment'
 
 on:
   push:
+    branches:
+     - main
     paths:
       - 'prd/**'
 
