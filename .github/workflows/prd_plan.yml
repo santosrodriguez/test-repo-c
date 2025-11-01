@@ -1,4 +1,4 @@
-name: 'Pull Request on PRD environment'
+name: 'plan on PRD'
 
 on:
   pull_request:
