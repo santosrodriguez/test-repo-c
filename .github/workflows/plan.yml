@@ -1,0 +1,125 @@
+name: 'Terraform Plan (matrix)'
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'dev/**'
+      - 'int/**'
+      - 'crt/**'
+      - 'prd/**'
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+  issues: write
+
+env:
+  TF_LOG: INFO
+  TF_INPUT: false
+
+jobs:
+  detect:
+    name: Detect changed environments
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: pf
+        with:
+          filters: |
+            dev: 'dev/**'
+            int: 'int/**'
+            crt: 'crt/**'
+            prd: 'prd/**'
+      - id: set
+        run: |
+          changed=()
+          for e in dev int crt prd; do
+            if [ "${{ steps.pf.outputs[$e] }}" == "true" ]; then
+              changed+=("{\"env\":\"$e\",\"dir\":\"./$e\"}")
+            fi
+          done
+          echo "matrix={\"include\":[${changed[*]}]}" >> "$GITHUB_OUTPUT"
+
+  plan:
+    name: Terraform Plan
+    needs: detect
+    if: needs.detect.outputs.matrix != ''
+    strategy:
+      matrix: ${{ fromJson(needs.detect.outputs.matrix) }}
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ matrix.env }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ matrix.dir }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+
+      - name: Azure OIDC Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Terraform Init
+        env:
+          TF_STORAGE_ACCOUNT:     ${{ secrets.TF_STORAGE_ACCOUNT }}
+          TF_CONTAINER_NAME:      ${{ secrets.TF_CONTAINER_NAME }}
+          TF_RESOURCE_GROUP_NAME: ${{ secrets.TF_RESOURCE_GROUP_NAME }}
+          TF_SUBSCRIPTION_ID:     ${{ secrets.TF_SUBSCRIPTION_ID }}
+        run: |
+          terraform init \
+            -backend-config="storage_account_name=$TF_STORAGE_ACCOUNT" \
+            -backend-config="container_name=$TF_CONTAINER_NAME" \
+            -backend-config="resource_group_name=$TF_RESOURCE_GROUP_NAME" \
+            -backend-config="subscription_id=$TF_SUBSCRIPTION_ID"
+
+      - name: Terraform fmt
+        run: terraform fmt -check
+
+      - name: Terraform validate
+        run: terraform validate -no-color | tee validate.log
+
+      - name: Terraform plan
+        id: plan
+        run: terraform plan -no-color | tee plan.log
+
+      - name: Comment plan on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v6
+        env:
+          PLAN: "terraform\n${{ steps.plan.outputs.stdout }}"
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const plan = fs.readFileSync('plan.log','utf8');
+            const output = `#### Terraform Plan for ${process.env.GITHUB_ENVIRONMENT}
+
+<details><summary>Show Plan</summary>
+
+\`\`\`
+${plan}
+\`\`\`
+
+</details>
+
+*Env = ${{ matrix.env }}, Dir = ${{ matrix.dir }}*`;
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            })
