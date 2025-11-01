@@ -1,0 +1,114 @@
+name: 'Terraform Apply (matrix)'
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'dev/**'
+      - 'int/**'
+      - 'crt/**'
+      - 'prd/**'
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: read
+  checks: read
+
+env:
+  TF_LOG: INFO
+  TF_INPUT: false
+
+jobs:
+  detect:
+    name: Detect changed environments
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: pf
+        with:
+          filters: |
+            dev: 'dev/**'
+            int: 'int/**'
+            crt: 'crt/**'
+            prd: 'prd/**'
+      - id: set
+        run: |
+          changed=()
+          for e in dev int crt prd; do
+            if [ "${{ steps.pf.outputs[$e] }}" == "true" ]; then
+              changed+=("{\"env\":\"$e\",\"dir\":\"./$e\"}")
+            fi
+          done
+          echo "matrix={\"include\":[${changed[*]}]}" >> "$GITHUB_OUTPUT"
+
+  apply:
+    name: Terraform Apply
+    needs: detect
+    if: needs.detect.outputs.matrix != ''
+    strategy:
+      matrix: ${{ fromJson(needs.detect.outputs.matrix) }}
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ matrix.env }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ matrix.dir }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify approved PR merge
+        id: gate
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          result-encoding: string
+          script: |
+            const commitSha = context.payload.after;
+            const owner = context.repo.owner;
+            const repo  = context.repo.repo;
+            async function result(payload){return JSON.stringify(payload);}
+            const { data: prs } =
+              await github.rest.repos.listPullRequestsAssociatedWithCommit({ owner, repo, commit_sha: commitSha });
+            if (!prs.length) return result({ proceed:false, reason:'no_pr' });
+            const pr = prs[0];
+            if (!pr.merged_at) return result({ proceed:false, reason:'not_merged' });
+            const { data: reviews } = await github.rest.pulls.listReviews({ owner, repo, pull_number: pr.number });
+            const approved = reviews.some(r => r.state === 'APPROVED');
+            if (!approved) return result({ proceed:false, reason:'not_approved' });
+            return result({ proceed:true });
+
+      - name: Setup Terraform
+        if: ${{ fromJson(steps.gate.outputs.result).proceed }}
+        uses: hashicorp/setup-terraform@v2
+
+      - name: Azure OIDC Login
+        if: ${{ fromJson(steps.gate.outputs.result).proceed }}
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Terraform Init
+        if: ${{ fromJson(steps.gate.outputs.result).proceed }}
+        env:
+          TF_STORAGE_ACCOUNT:     ${{ secrets.TF_STORAGE_ACCOUNT }}
+          TF_CONTAINER_NAME:      ${{ secrets.TF_CONTAINER_NAME }}
+          TF_RESOURCE_GROUP_NAME: ${{ secrets.TF_RESOURCE_GROUP_NAME }}
+          TF_SUBSCRIPTION_ID:     ${{ secrets.TF_SUBSCRIPTION_ID }}
+        run: |
+          terraform init \
+            -backend-config="storage_account_name=$TF_STORAGE_ACCOUNT" \
+            -backend-config="container_name=$TF_CONTAINER_NAME" \
+            -backend-config="resource_group_name=$TF_RESOURCE_GROUP_NAME" \
+            -backend-config="subscription_id=$TF_SUBSCRIPTION_ID"
+
+      - name: Terraform Apply
+        if: ${{ fromJson(steps.gate.outputs.result).proceed }}
+        run: terraform apply -auto-approve
