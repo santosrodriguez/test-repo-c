@@ -61,13 +61,13 @@ terraform-repo/
 │   ├── outputs.tf
 │   ├── backend.hcl
 │   └── int.tfvars
-├── art/
+├── crt/
 │   ├── main.tf
 │   ├── variables.tf
 │   ├── outputs.tf
 │   ├── backend.hcl
 │   └── art.tfvars
-├── pre/
+├── prd/
 │   ├── main.tf
 │   ├── variables.tf
 │   ├── outputs.tf
