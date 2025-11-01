@@ -25,7 +25,8 @@ jobs:
     name: Detect changed environments
     runs-on: ubuntu-latest
     outputs:
-      matrix: ${{ steps.set.outputs.matrix }}
+      matrix:  ${{ steps.set.outputs.matrix }}
+      has_any: ${{ steps.set.outputs.has_any }}
     steps:
       - uses: actions/checkout@v4
 
@@ -38,7 +39,6 @@ jobs:
             crt: 'crt/**'
             prd: 'prd/**'
 
-      # Build a JSON matrix safely (no dynamic indexing in expressions)
       - id: set
         env:
           DEV_CHANGED: ${{ steps.pf.outputs.dev }}
@@ -54,15 +54,17 @@ jobs:
 
           if [ ${#changed[@]} -eq 0 ]; then
             echo 'matrix={"include":[]}' >> "$GITHUB_OUTPUT"
+            echo 'has_any=false' >> "$GITHUB_OUTPUT"
           else
             printf -v joined '%s,' "${changed[@]}"
             echo "matrix={\"include\":[${joined%,}]}" >> "$GITHUB_OUTPUT"
+            echo 'has_any=true' >> "$GITHUB_OUTPUT"
           fi
 
   plan:
     name: Terraform Plan
     needs: detect
-    if: needs.detect.outputs.matrix != ''
+    if: needs.detect.outputs.has_any == 'true'
     strategy:
       matrix: ${{ fromJson(needs.detect.outputs.matrix) }}
     runs-on: ubuntu-latest
@@ -107,18 +109,23 @@ jobs:
         run: terraform validate -no-color | tee validate.log
 
       - name: Terraform plan
-        id: plan
         run: terraform plan -no-color | tee plan.log
 
       - name: Comment plan on PR
         if: github.event_name == 'pull_request'
         uses: actions/github-script@v6
+        env:
+          MATRIX_ENV: ${{ matrix.env }}
+          MATRIX_DIR: ${{ matrix.dir }}
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const fs = require('fs');
             const plan = fs.readFileSync('plan.log','utf8');
-            const output = `#### Terraform Plan
+            const envName = process.env.MATRIX_ENV;
+            const dir = process.env.MATRIX_DIR;
+
+            const body = `#### Terraform Plan
 
 <details><summary>Show Plan</summary>
 
@@ -128,13 +135,11 @@ ${plan}
 
 </details>
 
-*Env = ${process.env.MATRIX_ENV || '${{ matrix.env }}'}, Dir = ${process.env.MATRIX_DIR || '${{ matrix.dir }}'}*`;
-            github.rest.issues.createComment({
+*Env = ${envName}, Dir = ${dir}*`;
+
+            await github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: output
-            })
-        env:
-          MATRIX_ENV: ${{ matrix.env }}
-          MATRIX_DIR: ${{ matrix.dir }}
+              body
+            });
