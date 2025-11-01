@@ -1,9 +1,11 @@
-name: 'Push on CRT environment'
+name: 'plan on CRT'
 
 on:
   push:
+    branches:
+    - main
     paths:
-      - 'crt/**'
+    - 'crt/**'
 
 env:
   TF_LOG: INFO
