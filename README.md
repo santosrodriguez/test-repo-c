@@ -75,6 +75,6 @@ terraform-repo/
 │   ├── backend.hcl
 │   └── pre.tfvars
 └── common.auto.tfvars
-***
+
 
 Each environment’s backend.hcl defines its own Azure Storage Account, container, and state file name, ensuring isolated state management and clear backend separation.
