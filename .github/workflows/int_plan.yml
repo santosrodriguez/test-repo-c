@@ -1,4 +1,4 @@
-name: 'Pull Request on INT environment'
+name: 'plan on INT'
 
 on:
   pull_request:
