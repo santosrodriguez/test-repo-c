@@ -1,4 +1,4 @@
-name: 'Push on DEV environment'
+name: 'apply on INT'
 
 on:
   push:
