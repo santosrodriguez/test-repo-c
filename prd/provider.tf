@@ -1,3 +1,9 @@
+provider "azurerm" {
+  features {}
+  use_oidc = true
+}
+
+
 terraform {
   required_providers {
     azurerm = {
