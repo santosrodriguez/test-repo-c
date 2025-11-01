@@ -1,2 +1,1 @@
-# tt-folder-example
-Folder based multi environment example
+This workflow handles Terraform deployments for the dev, int, art, and pre environments. Each environment maintains its own set of Terraform files and does not share code. This approach is ideal when environments are expected to differ in configuration or infrastructure.
