@@ -1,4 +1,4 @@
-name: 'Pull Request on CRT environment'
+name: 'apply on CRT'
 
 on:
   pull_request:
