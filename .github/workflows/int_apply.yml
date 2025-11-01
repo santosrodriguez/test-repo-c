@@ -3,9 +3,9 @@ name: 'Push on DEV environment'
 on:
   push:
     branches:
-     - main
+    - main
     paths:
-      - 'int/**'
+    - 'int/**'
 
 env:
   TF_LOG: INFO
