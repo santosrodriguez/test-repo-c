@@ -48,7 +48,7 @@ Repository Structure
 
 Each environment resides in its own directory, containing Terraform configuration files and a dedicated backend configuration for the Azure Storage Account state file.
 
-***
+***bash
 terraform-repo/
 ├── dev/
 │   ├── main.tf
