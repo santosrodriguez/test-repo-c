@@ -1,7 +1,7 @@
 variable "prefix" {
   type        = string
   description = "(Optional) The prefix which should be used for all resources in this example. Defaults to taco."
-  default     = "rice"
+  default     = "quacamole"
 }
 
 variable "location" {
