@@ -3,9 +3,9 @@ name: 'plan on DEV'
 on:
   pull_request:
     branches:
-      - main
+    - main
     paths:
-      - 'dev/**'
+    - 'dev/**'
   workflow_dispatch:
     inputs:
       target_ref:
