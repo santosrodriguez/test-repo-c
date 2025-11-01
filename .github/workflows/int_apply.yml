@@ -1,7 +1,9 @@
-name: 'Push on INT environment'
+name: 'Push on DEV environment'
 
 on:
   push:
+    branches:
+     - main
     paths:
       - 'int/**'
 
