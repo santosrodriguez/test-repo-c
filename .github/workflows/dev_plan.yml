@@ -1,4 +1,4 @@
-name: 'Pull Request on DEV environment'
+name: 'plan on DEV'
 
 on:
   pull_request:
