@@ -1,4 +1,4 @@
-name: 'apply on CRT'
+name: 'plan on CRT'
 
 on:
   pull_request:
