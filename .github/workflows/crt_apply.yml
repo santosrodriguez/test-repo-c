@@ -1,4 +1,4 @@
-name: 'plan on CRT'
+name: 'apply on CRT'
 
 on:
   push:
