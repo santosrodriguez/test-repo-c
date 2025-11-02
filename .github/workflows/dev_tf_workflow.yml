@@ -1,0 +1,316 @@
+name: 'DEV Infrastructure'
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'dev/**'
+  workflow_dispatch:
+    inputs:
+      target_ref:
+        description: 'Branch or tag to check'
+        required: true
+        default: 'main'
+  push:
+    branches:
+      - main
+    paths:
+      - 'dev/**'
+
+env:
+  TF_LOG: INFO
+  TF_INPUT: false
+
+permissions:
+  id-token: write
+  issues: write
+  pull-requests: write
+  contents: read
+  checks: read
+
+jobs:
+  pr-infra-check:
+    if: github.event_name != 'push'
+    runs-on: ubuntu-latest
+    environment:
+      name: dev
+    defaults:
+      run:
+        shell: bash
+        working-directory: ./dev
+
+    steps:
+      # Checkout the repository to the GitHub Actions runner
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.target_ref || github.ref }}
+
+      # Install the latest version of Terraform CLI
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+
+      # Log into Azure with OIDC integration
+      - name: 'Az CLI login'
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # Run az commands to confirm sub access
+      - name: 'Run az commands'
+        run: |
+          az account show
+
+      # Run Terraform init
+      - name: Terraform Init
+        id: init
+        env:
+          TF_STORAGE_ACCOUNT: ${{ secrets.TF_STORAGE_ACCOUNT }}
+          TF_CONTAINER_NAME: ${{ secrets.TF_CONTAINER_NAME }}
+          TF_RESOURCE_GROUP_NAME: ${{ secrets.TF_RESOURCE_GROUP_NAME }}
+          TF_SUBSCRIPTION_ID: ${{ secrets.TF_SUBSCRIPTION_ID }}
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        run: terraform init -backend-config="storage_account_name=$TF_STORAGE_ACCOUNT" -backend-config="container_name=$TF_CONTAINER_NAME" -backend-config="resource_group_name=$TF_RESOURCE_GROUP_NAME" -backend-config="subscription_id=$TF_SUBSCRIPTION_ID"
+
+      # Run a Terraform fmt
+      - name: Terraform format
+        id: fmt
+        run: terraform fmt -check
+
+      # Run a Terraform validate
+      - name: Terraform validate
+        id: validate
+        if: success() || failure()
+        env:
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        run: |
+          set -o pipefail
+          terraform validate -no-color | tee validate.log
+          {
+            echo "stdout<<EOF"
+            cat validate.log
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      # Run a Terraform plan
+      - name: Terraform plan
+        id: plan
+        env:
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        run: |
+          set -o pipefail
+          terraform plan -no-color | tee plan.log
+          {
+            echo "stdout<<EOF"
+            cat plan.log
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      # Add a comment to pull requests with plan results weeeeeee
+      - name: Add Plan Comment
+        id: comment
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v6
+        env:
+          PLAN: "terraform\n${{ steps.plan.outputs.stdout }}"
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const output = `#### Terraform Format and Style 🖌\`${{ steps.fmt.outcome }}\`
+            #### Terraform Initialization ⚙️\`${{ steps.init.outcome }}\`
+            #### Terraform Validation 🤖${{ steps.validate.outputs.stdout }}
+            #### Terraform Plan 📖\`${{ steps.plan.outcome }}\`
+
+            <details><summary>Show Plan</summary>
+
+            \`\`\`${process.env.PLAN}\`\`\`
+
+            </details>
+
+            *Pusher: @${{ github.actor }}, Action: \`${{ github.event_name }}\`, Working Directory: \`${{ env.tf_actions_working_dir }}\`, Workflow: \`${{ github.workflow }}\`*`;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            })
+
+      - name: Show Plan Summary
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          cat <<'EOF'
+          Terraform Format: ${{ steps.fmt.outcome }}
+          Terraform Init: ${{ steps.init.outcome }}
+          Terraform Validate:
+          ${{ steps.validate.outputs.stdout }}
+          Terraform Plan: ${{ steps.plan.outcome }}
+          Plan Output:
+          ${{ steps.plan.outputs.stdout }}
+          EOF
+
+  terraform:
+    if: github.event_name == 'push'
+    name: 'Terraform Push'
+    runs-on: ubuntu-latest
+    environment:
+      name: dev
+
+    defaults:
+      run:
+        shell: bash
+        working-directory: ./dev
+
+    steps:
+      # Determine whether this push came from an approved PR
+      - name: Determine deployment eligibility
+        id: pr-gate
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          result-encoding: string
+          script: |
+            const commitSha = context.payload.after;
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            async function result(payload) {
+              return JSON.stringify(payload);
+            }
+
+            const { data: prs } = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+              owner,
+              repo,
+              commit_sha: commitSha,
+            });
+
+            if (!prs.length) {
+              core.notice(`No pull request found for commit ${commitSha}. Skipping deployment.`);
+              return result({ proceed: false, reason: 'no_pr' });
+            }
+
+            const pr = prs.find(p => p.base?.ref === 'main') ?? prs[0];
+
+            if (!pr.merged_at) {
+              core.notice(`Pull request #${pr.number} is not merged. Skipping deployment.`);
+              return result({ proceed: false, reason: 'not_merged', pr: pr.number });
+            }
+
+            const { data: reviews } = await github.rest.pulls.listReviews({
+              owner,
+              repo,
+              pull_number: pr.number,
+            });
+
+            const approved = reviews.some(review => review.state === 'APPROVED');
+
+            if (!approved) {
+              core.notice(`Pull request #${pr.number} has no approving reviews. Skipping deployment.`);
+              return result({ proceed: false, reason: 'not_approved', pr: pr.number });
+            }
+
+            const candidateRefs = Array.from(
+              new Set(
+                [pr.head?.sha, pr.merge_commit_sha, commitSha].filter(Boolean)
+              )
+            );
+
+            let devCheck = null;
+
+            for (const ref of candidateRefs) {
+              const { data: checkRuns } = await github.rest.checks.listForRef({
+                owner,
+                repo,
+                ref,
+              });
+
+              devCheck = checkRuns.check_runs?.find(
+                run => run.name === 'pr-infra-check' && run.conclusion === 'success'
+              );
+
+              if (devCheck) {
+                core.info(`Found successful 'pr-infra-check' on ${ref}.`);
+                break;
+              }
+            }
+            if (!devCheck) {
+              core.notice(`Required workflow 'pr-infra-check' did not complete successfully for commit ${commitSha}. Skipping deployment.`);
+              return result({ proceed: false, reason: 'check_failed', pr: pr.number });
+            }
+
+            core.notice(`Deploying commit ${commitSha} from approved PR #${pr.number}.`);
+            return result({ proceed: true, pr: pr.number });
+
+      # Checkout the repository to the GitHub Actions runner
+      - name: Checkout
+        if: ${{ fromJson(steps.pr-gate.outputs.result).proceed }}
+        uses: actions/checkout@v4
+
+      # Install the preferred version of Terraform CLI
+      - name: Setup Terraform
+        if: ${{ fromJson(steps.pr-gate.outputs.result).proceed }}
+        uses: hashicorp/setup-terraform@v2
+
+      # Log into Azure with OIDC integration if branch is main
+      - name: 'Az CLI login for Main branch'
+        if: ${{ fromJson(steps.pr-gate.outputs.result).proceed && github.ref == 'refs/heads/main' }}
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # Run Terraform init for Main branch
+      - name: Terraform Init for Main branch
+        id: init-main
+        if: ${{ fromJson(steps.pr-gate.outputs.result).proceed && github.ref == 'refs/heads/main' }}
+        env:
+          TF_STORAGE_ACCOUNT: ${{ secrets.TF_STORAGE_ACCOUNT }}
+          TF_CONTAINER_NAME: ${{ secrets.TF_CONTAINER_NAME }}
+          TF_RESOURCE_GROUP_NAME: ${{ secrets.TF_RESOURCE_GROUP_NAME }}
+          TF_SUBSCRIPTION_ID: ${{ secrets.TF_SUBSCRIPTION_ID }}
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        run: terraform init -backend-config="storage_account_name=$TF_STORAGE_ACCOUNT" -backend-config="container_name=$TF_CONTAINER_NAME" -backend-config="resource_group_name=$TF_RESOURCE_GROUP_NAME" -backend-config="subscription_id=$TF_SUBSCRIPTION_ID"
+
+      # Run Terraform apply if branch is main
+      - name: Terraform Apply for Main branch
+        if: ${{ fromJson(steps.pr-gate.outputs.result).proceed && github.ref == 'refs/heads/main' }}
+        id: apply
+        env:
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        run: terraform apply -auto-approve
+
+      # Run formatting and validate if the branch is not main
+      - name: Terraform Init for other branches
+        id: init
+        if: ${{ fromJson(steps.pr-gate.outputs.result).proceed && github.ref != 'refs/heads/main' }}
+        run: terraform init -backend=false
+
+      # Run a Terraform format
+      - name: Terraform format for other branches
+        if: ${{ fromJson(steps.pr-gate.outputs.result).proceed && github.ref != 'refs/heads/main' }}
+        id: fmt
+        run: terraform fmt -check
+
+      # Run a Terraform validate
+      - name: Terraform validate for other branches
+        id: validate
+        if: ${{ (success() || failure()) && fromJson(steps.pr-gate.outputs.result).proceed && github.ref != 'refs/heads/main' }}
+        env:
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        run: terraform validate -no-color
